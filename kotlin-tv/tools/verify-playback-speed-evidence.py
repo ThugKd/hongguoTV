@@ -1,7 +1,7 @@
 """Verify playback buffering evidence from a captured logcat.
 
 Usage:
-    adb logcat -c && adb logcat -s HongguoTV > playback.log
+    adb logcat -c && adb logcat -s LvguoTV > playback.log
     # play one episode end to end, then exit playback so the Prefetch line is written
     python tools/verify-playback-speed-evidence.py playback.log
 

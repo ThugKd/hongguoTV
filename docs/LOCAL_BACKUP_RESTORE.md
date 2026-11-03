@@ -51,7 +51,7 @@
   - `hongguotv-backup.prev.json`：上一份轮换副本
   - `hongguotv-backup.json.tmp`：写入中的临时文件
 - 每次整体覆盖，不累积多份；只识别上述固定文件名，目录中用户放入的其他文件一律忽略。
-- 序列化复用 [LibraryBackup.encode()](../kotlin-tv/core/src/main/kotlin/com/hongguotv/core/LibraryBackup.kt)（`format="hongguotv.library"`、`version=1`、≤2 MB），数据来自 `LibraryIndex.snapshot()`。
+- 序列化复用 [LibraryBackup.encode()](../kotlin-tv/core/src/main/kotlin/com/thugkd/lvguotv/core/LibraryBackup.kt)（`format="hongguotv.library"`、`version=1`、≤2 MB），数据来自 `LibraryIndex.snapshot()`。
 
 轮换写入顺序（每一步单独可中断）：
 

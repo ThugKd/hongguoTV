@@ -1,4 +1,4 @@
-﻿name: Build and publish TV update
+name: Build and publish TV update
 on:
   push:
     branches: [main]
@@ -24,21 +24,22 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Set monotonic build version and restore signing key
         env:
-          KEYSTORE_B64: ${{ secrets.HONGGUOTV_KEYSTORE_B64 }}
+          # Accept existing signing secrets without changing the signing key.
+          KEYSTORE_B64: ${{ secrets.LVGUOTV_KEYSTORE_B64 || secrets.HONGGUOTV_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_B64"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "HONGGUOTV_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "HONGGUOTV_VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "HONGGUOTV_VERSION_NAME=0.9.3+$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "LVGUOTV_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_NAME=0.9.3+$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           echo "UPDATE_TAG=kotlin-v0.9.3-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
       - name: Tests, release lint, and signed APK
         env:
-          HONGGUOTV_STORE_PASSWORD: ${{ secrets.HONGGUOTV_STORE_PASSWORD }}
-          HONGGUOTV_KEY_ALIAS: ${{ secrets.HONGGUOTV_KEY_ALIAS }}
-          HONGGUOTV_KEY_PASSWORD: ${{ secrets.HONGGUOTV_KEY_PASSWORD }}
+          LVGUOTV_STORE_PASSWORD: ${{ secrets.LVGUOTV_STORE_PASSWORD || secrets.HONGGUOTV_STORE_PASSWORD }}
+          LVGUOTV_KEY_ALIAS: ${{ secrets.LVGUOTV_KEY_ALIAS || secrets.HONGGUOTV_KEY_ALIAS }}
+          LVGUOTV_KEY_PASSWORD: ${{ secrets.LVGUOTV_KEY_PASSWORD || secrets.HONGGUOTV_KEY_PASSWORD }}
         run: ./kotlin-tv/gradlew -p kotlin-tv :core:test :app:lintRelease :app:assembleRelease --console=plain
       - name: Publish APK, source, and update manifest
         env:

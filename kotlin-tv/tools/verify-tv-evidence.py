@@ -8,7 +8,7 @@ def nodes(name):return list(ET.parse(root/(name+'.xml')).iter('node'))
 def texts(name):return [n.get('text','') for n in nodes(name) if n.get('text')]
 def focus(name):
     node=next(n for n in nodes(name) if n.get('focused')=='true')
-    assert node.get('package')=='com.hongguotv.nativeapp',f'{name}: not the native app'
+    assert node.get('package')=='com.thugkd.lvguotv',f'{name}: not the native app'
     return node
 def check(name,value):
     assert value,name
@@ -17,7 +17,7 @@ def position(name):
     value=next(t for t in texts(name) if '已暂停' in t)
     m=re.search(r'(\d+):(\d+) /',value)
     return int(m[1])*60+int(m[2])
-check('native application home',focus('final-01-home').get('package')=='com.hongguotv.nativeapp')
+check('native application home',focus('final-01-home').get('package')=='com.thugkd.lvguotv')
 card=focus('final-02-row-scroll')
 check('second row scroll aligns to complete row',card.get('bounds')==focus('final-01-home').get('bounds'))
 check('detail defaults to play',focus('final-03-detail').get('text')=='开始观看')

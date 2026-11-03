@@ -1,0 +1,231 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package com.thugkd.lvguotv.core
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URI
+
+data class BackupProgress(val series: Series,val episodeId: String,val episodeIndex: Int,val position: Long,val duration: Long,val completed: Boolean,val updatedAt: Long,val episodeCount: Int=0) {
+    fun json()=JSONObject().put("series",LibraryBackup.seriesJson(series)).put("episodeId",episodeId).put("episodeIndex",episodeIndex).put("position",position).put("duration",duration).put("completed",completed).put("updatedAt",updatedAt).put("episodeCount",episodeCount)
+}
+data class BackupSettings(val quality: Int=1080,val speed: Float=1f,val autoNext: Boolean=true,val type: ContentType=ContentType.COMIC,val frame: VideoFrameMode=VideoFrameMode.FIT,val autoSeason: Boolean=true,val danmaku: Boolean=true,
+    val danmakuOpacity: Int=DanmakuPrefs.OPACITY_DEFAULT,val danmakuFont: Int=DanmakuPrefs.FONT_DEFAULT,val danmakuSpeed: Int=DanmakuPrefs.SPEED_DEFAULT,val danmakuRows: Int=DanmakuPrefs.ROWS_DEFAULT,
+    val showClock: Boolean=false,val sourceHidden: Boolean=false,val navHidden: Set<String> = emptySet()) {
+    fun json()=JSONObject().put("quality",quality).put("speed",speed.toDouble()).put("autoNext",autoNext).put("type",type.storedValue).put("frame",frame.name).put("autoSeason",autoSeason).put("danmaku",danmaku)
+        .put("danmakuOpacity",danmakuOpacity).put("danmakuFont",danmakuFont).put("danmakuSpeed",danmakuSpeed).put("danmakuRows",danmakuRows).put("showClock",showClock).put("sourceHidden",sourceHidden)
+        .put("navHidden",JSONArray(navHidden.filter { it in LibraryBackup.NAV_KEYS }.sorted()))
+}
+data class BackupData(val favorites: List<Series>,val history: List<BackupProgress>,val watched: Set<String>,val searches: List<RecentSearch>,val settings: BackupSettings,val later: List<Series> = emptyList(),val hidden: Set<String> = emptySet(),val favoriteGroups: Map<String,String> = emptyMap(),val thirdSources: List<BackupThirdSource> = emptyList(),val thirdHistory: List<BackupThirdHistory> = emptyList(),val thirdFavorites: List<BackupThirdFavorite> = emptyList())
+
+/** 三方片源配置：只保存名称与接口，随主备份一起迁移；恢复时只追加不覆盖。 */
+data class BackupThirdSource(val name: String,val api: String)
+
+/** 三方片源收藏：随主备份迁移，恢复时按「源接口 + 影片」保留较新的一条。 */
+data class BackupThirdFavorite(
+    val sourceApi: String,val sourceName: String,val videoId: String,val title: String,val cover: String,
+    val episodeIndex: Int,val episodeLabel: String,val positionMs: Long,val updatedAt: Long
+) {
+    fun json()=JSONObject().put("sourceApi",sourceApi).put("sourceName",sourceName).put("videoId",videoId)
+        .put("title",title).put("cover",cover).put("episodeIndex",episodeIndex).put("episodeLabel",episodeLabel)
+        .put("positionMs",positionMs).put("updatedAt",updatedAt)
+}
+
+/** 三方片源观看记录：随主备份迁移，恢复时按「源接口 + 影片」合并并保留较新的进度。 */
+data class BackupThirdHistory(
+    val sourceApi: String,val sourceName: String,val videoId: String,val title: String,val cover: String,
+    val episodeIndex: Int,val episodeLabel: String,val positionMs: Long,val durationMs: Long,
+    val updatedAt: Long,val completed: Boolean
+) {
+    fun json()=JSONObject().put("sourceApi",sourceApi).put("sourceName",sourceName).put("videoId",videoId)
+        .put("title",title).put("cover",cover).put("episodeIndex",episodeIndex).put("episodeLabel",episodeLabel)
+        .put("positionMs",positionMs).put("durationMs",durationMs).put("updatedAt",updatedAt).put("completed",completed)
+}
+
+object LibraryBackup {
+    const val MAX_BYTES=2*1024*1024
+    /** 首页与设置始终显示，只有这四个导航模块支持单独隐藏。 */
+    val NAV_KEYS=setOf("search","rank","favorite","history")
+    const val MAX_THIRD_HISTORY=100
+    const val MAX_THIRD_FAVORITES=100
+    private val idPattern=Regex("[0-9]{1,30}")
+    private fun id(value: String)=value.also { require(idPattern.matches(it)) { "剧集标识无效" } }
+    private fun cleanCover(value: String): String=runCatching {
+        val uri=URI(value); val host=uri.host.orEmpty().lowercase()
+        value.takeIf { it.length<=2048 && uri.scheme=="https" && uri.userInfo==null && host.isNotEmpty() && !host.contains(':') && !host.matches(Regex("[0-9.]+")) && host!="localhost" && !host.endsWith(".local") && !host.endsWith(".lan") && value.none(Char::isISOControl) }.orEmpty()
+    }.getOrDefault("")
+    private fun cleanText(value: String,max: Int)=value.map { if(it.isISOControl()) ' ' else it }.joinToString("").take(max)
+    fun seriesJson(series: Series)=series.copy(title=cleanText(series.title,200),cover=cleanCover(series.cover),description="",badge=cleanText(series.badge,100),tags=cleanText(series.tags,200)).toJson()
+    fun encode(data: BackupData): String {
+        val groups=JSONObject()
+        data.favoriteGroups.forEach { (key,name) -> val clean=cleanText(name,20); if(clean.isNotBlank()) groups.put(key,clean) }
+        val result=JSONObject().put("format","hongguotv.library").put("version",1).put("createdAt",System.currentTimeMillis())
+            .put("later",JSONArray(data.later.map(::seriesJson))).put("hidden",JSONArray(data.hidden.toList()))
+            .put("favorites",JSONArray(data.favorites.map(::seriesJson))).put("history",JSONArray(data.history.map { it.json() }))
+            .put("favoriteGroups",groups)
+            .put("thirdSources",JSONArray(data.thirdSources.take(ThirdSourceConfig.MAX).map { source ->
+                JSONObject().put("name",cleanText(source.name,40)).put("api",cleanText(source.api,500))
+            }))
+            .put("thirdHistory",JSONArray(data.thirdHistory.take(MAX_THIRD_HISTORY).map { hit -> JSONObject()
+                .put("sourceApi",cleanText(hit.sourceApi,500)).put("sourceName",cleanText(hit.sourceName,40))
+                .put("videoId",cleanText(hit.videoId,80)).put("title",cleanText(hit.title,200)).put("cover",cleanText(hit.cover,2048))
+                .put("episodeIndex",hit.episodeIndex.coerceIn(0,100_000)).put("episodeLabel",cleanText(hit.episodeLabel,60))
+                .put("positionMs",hit.positionMs.coerceAtLeast(0)).put("durationMs",hit.durationMs.coerceAtLeast(0))
+                .put("updatedAt",hit.updatedAt.coerceAtLeast(0)).put("completed",hit.completed)
+            }))
+            .put("thirdFavorites",JSONArray(data.thirdFavorites.take(MAX_THIRD_FAVORITES).map { fav -> JSONObject()
+                .put("sourceApi",cleanText(fav.sourceApi,500)).put("sourceName",cleanText(fav.sourceName,40))
+                .put("videoId",cleanText(fav.videoId,80)).put("title",cleanText(fav.title,200)).put("cover",cleanText(fav.cover,2048))
+                .put("episodeIndex",fav.episodeIndex.coerceIn(0,100_000)).put("episodeLabel",cleanText(fav.episodeLabel,60))
+                .put("positionMs",fav.positionMs.coerceAtLeast(0)).put("updatedAt",fav.updatedAt.coerceAtLeast(0))
+            }))
+            .put("watched",JSONArray(data.watched.intersect((data.favorites.map { it.id }+data.history.map { it.series.id }).toSet()).take(500)))
+            .put("searches",JSONArray(SearchHistory.encode(data.searches.map { it.copy(query=cleanText(it.query,80)) }))).put("settings",data.settings.json()).toString()
+        require(result.toByteArray(Charsets.UTF_8).size<=MAX_BYTES) { "备份超过 2 MB 限制" }
+        return result
+    }
+    private fun JSONObject.number(key: String,max: Long): Long {
+        val value=get(key); require(value is Number) { "数值字段无效" }
+        val decimal=value.toDouble(); val integer=value.toLong()
+        require(decimal.isFinite() && decimal==integer.toDouble() && integer in 0..max) { "数值范围无效" }; return integer
+    }
+    private fun JSONObject.string(key: String,max: Int): String {
+        val value=get(key); require(value is String && value.length<=max && value.none(Char::isISOControl)) { "文字字段无效" }; return value
+    }
+    private fun JSONObject.rows(key: String,max: Int): List<JSONObject> {
+        val array=getJSONArray(key); require(array.length()<=max) { "记录数量超过上限" }
+        return (0 until array.length()).map { array.getJSONObject(it) }
+    }
+    private fun series(o: JSONObject): Series = Series(id(o.string("id",30)),o.string("title",200).also { require(it.isNotBlank()) },cleanCover(o.string("cover",2048)),"",o.string("badge",100),o.string("tags",200),o.opt("finished") as? Boolean)
+    fun decode(value: String): BackupData {
+        // 用户可能用记事本/Notepad++ 改过后另存为 UTF-8 with BOM，剥离 BOM 再解析避免误判「备份格式无效」
+        val v=value.trim().removePrefix("\uFEFF")
+        require(v.toByteArray(Charsets.UTF_8).size<=MAX_BYTES) { "备份超过 2 MB 限制" }
+        var depth=0; var quoted=false; var escaped=false
+        v.forEach { c ->
+            if(escaped) escaped=false
+            else if(quoted && c=='\\') escaped=true
+            else if(c=='"') quoted=!quoted
+            else if(!quoted) { if(c=='{' || c=='[') { depth++; require(depth<=12) { "备份结构过深" } }; if(c=='}' || c==']') depth-- }
+        }
+        val o=JSONObject(v)
+        require(o.getString("format")=="hongguotv.library" && o.number("version",1)==1L) { "不支持的备份格式或版本" }
+        val later=if(o.has("later")) o.rows("later",100).map(::series) else emptyList()
+        require(later.distinctBy { it.id }.size==later.size) { "稍后看包含重复剧集" }
+        val hidden=if(o.has("hidden")) o.getJSONArray("hidden") else JSONArray()
+        require(hidden.length()<=500)
+        val hiddenIds=(0 until hidden.length()).map { id(hidden.getString(it)) }.toSet()
+        val favorites=o.rows("favorites",500).map(::series)
+        val groupsJson=o.optJSONObject("favoriteGroups")
+        val favoriteGroups=mutableMapOf<String,String>()
+        if(groupsJson!=null) {
+            require(groupsJson.length()<=500) { "分组数量超过上限" }
+            groupsJson.keys().forEach { key ->
+                val name=groupsJson.get(key)
+                require(name is String && name.isNotBlank() && name.length<=20 && name.none(Char::isISOControl)) { "分组名称无效" }
+                favoriteGroups[id(key)]=name
+            }
+        }
+        val history=o.rows("history",200).map { row ->
+            val duration=row.number("duration",604_800_000)
+            BackupProgress(series(row.getJSONObject("series")),id(row.string("episodeId",30)),row.number("episodeIndex",100_000).toInt(),row.number("position",604_800_000).let { if(duration>0) minOf(it,duration) else it },duration,row.get("completed").also { require(it is Boolean) } as Boolean,row.number("updatedAt",4_102_444_800_000),if(row.has("episodeCount")) row.number("episodeCount",100_000).toInt() else 0)
+        }
+        require(favorites.distinctBy { it.id }.size==favorites.size && history.distinctBy { it.series.id }.size==history.size) { "备份包含重复剧集" }
+        val watched=o.getJSONArray("watched"); require(watched.length()<=500)
+        val watchedIds=(0 until watched.length()).map { id(watched.getString(it)) }.toSet()
+        val searches=o.rows("searches",20).map { row -> RecentSearch(row.string("query",80).also { require(it.isNotBlank()) },ContentType.entries.firstOrNull { it.storedValue==row.getString("type") } ?: error("搜索类型无效")) }
+        val settings=o.getJSONObject("settings")
+        val quality=settings.number("quality",1080).toInt(); require(quality in PlaybackQuality.options)
+        val speed=settings.get("speed"); require(speed is Number && speed.toFloat() in PlaybackSpeed.options)
+        val autoNext=settings.get("autoNext"); require(autoNext is Boolean)
+        val type=ContentType.entries.firstOrNull { it.storedValue==settings.getString("type") } ?: error("内容类型无效")
+        val frame=VideoFrameMode.entries.firstOrNull { it.name==settings.getString("frame") } ?: error("画面模式无效")
+        val autoSeason=settings.optBoolean("autoSeason",true)
+        val danmaku=settings.optBoolean("danmaku",true)
+        val danmakuOpacity=DanmakuPrefs.opacity(settings.optInt("danmakuOpacity",DanmakuPrefs.OPACITY_DEFAULT))
+        val danmakuFont=DanmakuPrefs.font(settings.optInt("danmakuFont",DanmakuPrefs.FONT_DEFAULT))
+        val danmakuSpeed=DanmakuPrefs.speed(settings.optInt("danmakuSpeed",DanmakuPrefs.SPEED_DEFAULT))
+        val danmakuRows=DanmakuPrefs.rows(settings.optInt("danmakuRows",DanmakuPrefs.ROWS_DEFAULT))
+        val showClock=settings.optBoolean("showClock",false)
+        // 旧备份没有该字段时按默认「显示」处理
+        val sourceHidden=settings.optBoolean("sourceHidden",false)
+        // 导航模块显隐：只认已知模块键，未知值忽略
+        val navHidden=runCatching {
+            settings.optJSONArray("navHidden")?.let { rows ->
+                (0 until rows.length()).mapNotNull { rows.optString(it).takeIf { key -> key in NAV_KEYS } }.toSet()
+            } ?: emptySet()
+        }.getOrDefault(emptySet())
+        // 三方源：旧备份没有该字段时静默为空；非法接口直接跳过，不影响整体恢复
+        val thirdSources=if(o.has("thirdSources")) o.rows("thirdSources",ThirdSourceConfig.MAX).mapNotNull { row ->
+            val api=runCatching { row.string("api",500) }.getOrNull() ?: return@mapNotNull null
+            if(!api.startsWith("http")) return@mapNotNull null
+            val name=runCatching { row.string("name",40) }.getOrDefault("")
+                .ifBlank { api.removePrefix("https://").removePrefix("http://").substringBefore('/') }
+            BackupThirdSource(name,api)
+        }.distinctBy { it.api } else emptyList()
+        // 三方观看历史：缺字段、类型异常或单条损坏都只影响这一段，绝不拖垮整份备份
+        val thirdHistory: List<BackupThirdHistory> = if(o.has("thirdHistory")) runCatching {
+            val rows=o.optJSONArray("thirdHistory") ?: return@runCatching emptyList<BackupThirdHistory>()
+            (0 until minOf(rows.length(),MAX_THIRD_HISTORY)).mapNotNull { index ->
+                runCatching {
+                    val row=rows.optJSONObject(index) ?: return@runCatching null
+                    val api=row.optString("sourceApi").take(500)
+                    val videoId=row.optString("videoId").take(80)
+                    if(!api.startsWith("http") || videoId.isBlank()) null else BackupThirdHistory(
+                        api,row.optString("sourceName").take(40),videoId,row.optString("title").take(200),
+                        row.optString("cover").take(2048),
+                        row.optInt("episodeIndex",0).coerceIn(0,100_000),row.optString("episodeLabel").take(60),
+                        row.optLong("positionMs",0).coerceIn(0,604_800_000),row.optLong("durationMs",0).coerceIn(0,604_800_000),
+                        row.optLong("updatedAt",0).coerceIn(0,4_102_444_800_000),row.optBoolean("completed",false))
+                }.getOrNull()
+            }
+        }.getOrDefault(emptyList()) else emptyList()
+        // 三方收藏：缺字段、类型异常或单条损坏都只影响这一段，绝不拖垮整份备份
+        val thirdFavorites: List<BackupThirdFavorite> = if(o.has("thirdFavorites")) runCatching {
+            val rows=o.optJSONArray("thirdFavorites") ?: return@runCatching emptyList<BackupThirdFavorite>()
+            (0 until minOf(rows.length(),MAX_THIRD_FAVORITES)).mapNotNull { index ->
+                runCatching {
+                    val row=rows.optJSONObject(index) ?: return@runCatching null
+                    val api=row.optString("sourceApi").take(500)
+                    val videoId=row.optString("videoId").take(80)
+                    if(!api.startsWith("http") || videoId.isBlank()) null else BackupThirdFavorite(
+                        api,row.optString("sourceName").take(40),videoId,row.optString("title").take(200),
+                        row.optString("cover").take(2048),
+                        row.optInt("episodeIndex",0).coerceIn(0,100_000),row.optString("episodeLabel").take(60),
+                        row.optLong("positionMs",0).coerceIn(0,604_800_000),row.optLong("updatedAt",0).coerceIn(0,4_102_444_800_000))
+                }.getOrNull()
+            }
+        }.getOrDefault(emptyList()) else emptyList()
+        return BackupData(favorites,history,watchedIds,searches,BackupSettings(quality,speed.toFloat(),autoNext,type,frame,autoSeason,danmaku,danmakuOpacity,danmakuFont,danmakuSpeed,danmakuRows,showClock,sourceHidden,navHidden),later,hiddenIds,favoriteGroups,thirdSources,thirdHistory,thirdFavorites)
+    }
+    /** Existing favorites stay first; only newer imported progress replaces a local record. */
+    fun merge(local: BackupData,incoming: BackupData,restoreSettings: Boolean): BackupData {
+        val favorites=(local.favorites+incoming.favorites).distinctBy { it.id }.take(500)
+        val records=local.history.associateBy { it.series.id }.toMutableMap()
+        val watched=local.watched.toMutableSet()
+        incoming.history.forEach { candidate ->
+            val id=candidate.series.id; val prior=records[id]
+            if(prior==null || candidate.updatedAt>prior.updatedAt) {
+                records[id]=candidate
+                if(id in incoming.watched) watched.add(id) else watched.remove(id)
+            }
+        }
+        incoming.watched.filter { id -> id !in records && local.favorites.none { it.id==id } }.forEach { watched.add(it) }
+        val history=records.values.sortedByDescending { it.updatedAt }.take(200)
+        val retained=(favorites.map { it.id }+history.map { it.series.id }).toSet()
+        val favoriteIds=favorites.map { it.id }.toSet()
+        val favoriteGroups=(local.favoriteGroups+incoming.favoriteGroups).filterKeys { it in favoriteIds }
+        // 三方源：本地优先，只补充备份里新增的接口，同接口不覆盖
+        val thirdSources=(local.thirdSources+incoming.thirdSources).distinctBy { it.api }.take(ThirdSourceConfig.MAX)
+        // 三方观看历史：同「源接口 + 影片」取进度较新的一条，按时间来排序并截断
+        val thirdHistory=(local.thirdHistory+incoming.thirdHistory)
+            .groupBy { it.sourceApi to it.videoId }
+            .mapNotNull { (_,rows) -> rows.maxByOrNull { it.updatedAt } }
+            .sortedByDescending { it.updatedAt }.take(MAX_THIRD_HISTORY)
+        // 三方收藏：同「源接口 + 影片」同样保留较新的一条
+        val thirdFavorites=(local.thirdFavorites+incoming.thirdFavorites)
+            .groupBy { it.sourceApi to it.videoId }
+            .mapNotNull { (_,rows) -> rows.maxByOrNull { it.updatedAt } }
+            .sortedByDescending { it.updatedAt }.take(MAX_THIRD_FAVORITES)
+        return BackupData(favorites,history,watched.intersect(retained).take(500).toSet(),(local.searches+incoming.searches).distinct().take(20),if(restoreSettings) incoming.settings else local.settings,(local.later+incoming.later).distinctBy { it.id }.take(100),(local.hidden+incoming.hidden).take(500).toSet(),favoriteGroups,thirdSources,thirdHistory,thirdFavorites)
+    }
+}

@@ -46,7 +46,7 @@
 - 真机跑核心路径：首页加载 → 搜索 → 详情 → 播放+弹幕 → 设置各弹窗 → 片源进出，记录行为
 
 ### 步骤 1：抽 UiKit.kt（风险低，减 ~50 行）
-- 新建 `app/src/main/kotlin/com/hongguotv/nativeapp/UiKit.kt`
+- 新建 `app/src/main/kotlin/com/thugkd/lvguotv/UiKit.kt`
 - L260-301 的 dp/lp/text/column/row/rounded/focusStyle/button/addButton 改写为
   Context 扩展函数搬出；默认参数 `white` → `TvStyle.text` 直读
 - MainActivity 调用点零改动；删除原成员函数

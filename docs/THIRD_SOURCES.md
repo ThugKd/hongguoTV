@@ -5,11 +5,11 @@
 
 ## 一、需求背景
 
-用户需要在红果TV 内新增「片源」模块：类似饭太硬/TVBox 的能力，支持添加第三方资源站接口地址，浏览并播放该站的全部视频资源。功能定位为红果TV 导航内的独立入口，但业务与红果现有内容体系完全隔离——红果的剧、搜索、收藏、历史、推荐不涉及三方内容，三方数据也不进入红果的任何体系。
+用户需要在绿果TV 内新增「片源」模块：类似饭太硬/TVBox 的能力，支持添加第三方资源站接口地址，浏览并播放该站的全部视频资源。功能定位为绿果TV 导航内的独立入口，但业务与红果现有内容体系完全隔离——红果的剧、搜索、收藏、历史、推荐不涉及三方内容，三方数据也不进入红果的任何体系。
 
 ## 二、定位与隔离原则
 
-同一个 App（红果TV），导航栏最右新增「片源」入口，进去之后是自成体系的功能，像「店中店」：同一个门牌，独立柜台。
+同一个 App（绿果TV），从设置中的「片源管理」入口进入，进去之后是自成体系的功能，像「店中店」：同一个门牌，独立柜台。
 
 ### 四层隔离
 
@@ -126,11 +126,11 @@ vod_play_url:  第01集$https://v.xxx.com/share/xxx#第02集$https://…   （# 
 
 | 文件 | 内容 |
 |---|---|
-| kotlin-tv/app/src/main/kotlin/com/hongguotv/nativeapp/ThirdCms.kt | 新建：CMS 协议客户端 + 播放地址解析 + TVBox 配置解析（纯函数可测），不含任何内置源 |
-| kotlin-tv/app/src/main/kotlin/com/hongguotv/nativeapp/ThirdStore.kt | 新建：源列表与进度持久化（独立 prefs） |
-| kotlin-tv/app/src/main/kotlin/com/hongguotv/nativeapp/ThirdSourceScreen.kt | 新建：片源页全部界面逻辑（空态/浏览/详情/播放控制） |
+| kotlin-tv/app/src/main/kotlin/com/thugkd/lvguotv/ThirdCms.kt | 新建：CMS 协议客户端 + 播放地址解析 + TVBox 配置解析（纯函数可测），不含任何内置源 |
+| kotlin-tv/app/src/main/kotlin/com/thugkd/lvguotv/ThirdStore.kt | 新建：源列表与进度持久化（独立 prefs） |
+| kotlin-tv/app/src/main/kotlin/com/thugkd/lvguotv/ThirdSourceScreen.kt | 新建：片源页全部界面逻辑（空态/浏览/详情/播放控制） |
 | kotlin-tv/app/src/test/…/ThirdCmsTest.kt | 新建：解析容错/GBK/分页/$#$$ 解析/TVBox 配置提取用例 |
-| kotlin-tv/app/src/main/kotlin/com/hongguotv/nativeapp/MainActivity.kt | 仅 +1 nav 项、+1 行分发、+release 清理一行 |
+| kotlin-tv/app/src/main/kotlin/com/thugkd/lvguotv/MainActivity.kt | 仅 +1 nav 项、+1 行分发、+release 清理一行 |
 | README.md | 免责声明追加一句（见第十一节） |
 
 红果 core/Library/备份格式零改动。工作量约 1000-1200 行新代码 + 测试。

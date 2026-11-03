@@ -5,22 +5,22 @@ val signingProperties = Properties().apply { val config = rootProject.file("keys
 fun signingValue(env: String, key: String): String? = System.getenv(env) ?: signingProperties.getProperty(key)
 
 android {
-    namespace = "com.hongguotv.nativeapp"
+    namespace = "com.thugkd.lvguotv"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.hongguotv.nativeapp"
-        minSdk = 26
+        applicationId = "com.thugkd.lvguotv"
+        minSdk = 23
         targetSdk = 36
-        versionCode = System.getenv("HONGGUOTV_VERSION_CODE")?.toInt() ?: 12
-        versionName = System.getenv("HONGGUOTV_VERSION_NAME") ?: "0.24.0"
+        versionCode = System.getenv("LVGUOTV_VERSION_CODE")?.toInt() ?: 1
+        versionName = System.getenv("LVGUOTV_VERSION_NAME") ?: "1.0.0"
     }
     buildFeatures { buildConfig = true }
     signingConfigs {
         create("delivery") {
-            storeFile = signingValue("HONGGUOTV_KEYSTORE", "storeFile")?.let { file(it) }
-            storePassword = signingValue("HONGGUOTV_STORE_PASSWORD", "storePassword")
-            keyAlias = signingValue("HONGGUOTV_KEY_ALIAS", "keyAlias")
-            keyPassword = signingValue("HONGGUOTV_KEY_PASSWORD", "keyPassword")
+            storeFile = signingValue("LVGUOTV_KEYSTORE", "storeFile")?.let { file(it) }
+            storePassword = signingValue("LVGUOTV_STORE_PASSWORD", "storePassword")
+            keyAlias = signingValue("LVGUOTV_KEY_ALIAS", "keyAlias")
+            keyPassword = signingValue("LVGUOTV_KEY_PASSWORD", "keyPassword")
         }
     }
     buildTypes { getByName("release") { signingConfig = signingConfigs.getByName("delivery"); isMinifyEnabled = true; isShrinkResources = true; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }

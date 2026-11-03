@@ -20,7 +20,7 @@
 
 ## 二、现有架构能承接什么（先划清能力边界）
 
-代码事实（`kotlin-tv/app/src/main/kotlin/com/hongguotv/nativeapp/ThirdCms.kt`）：
+代码事实（`kotlin-tv/app/src/main/kotlin/com/thugkd/lvguotv/ThirdCms.kt`）：
 
 - 只实现**苹果CMS v10 明文 JSON 协议**：`ac=list` 分类列表、`ac=detail&ids=` 详情、`ac=detail&wd=` 搜索、`ac=videolist`
 - 播放地址按 `$$$` 分组 → `#` 分集 → `名称$地址` 三层解析

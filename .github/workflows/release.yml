@@ -24,30 +24,31 @@ jobs:
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Set monotonic build version and restore signing key
         env:
-          KEYSTORE_B64: ${{ secrets.HONGGUOTV_KEYSTORE_B64 }}
+          # Accept existing signing secrets without changing the signing key.
+          KEYSTORE_B64: ${{ secrets.LVGUOTV_KEYSTORE_B64 || secrets.HONGGUOTV_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_B64"
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "HONGGUOTV_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "HONGGUOTV_VERSION_CODE=$((10200 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "HONGGUOTV_VERSION_NAME=0.24.0+$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
-          echo "UPDATE_TAG=kotlin-v0.24.0-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "LVGUOTV_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_CODE=$((10200 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_NAME=1.0.0" >> "$GITHUB_ENV"
+          echo "UPDATE_TAG=kotlin-v1.0.0-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           {
             echo "RELEASE_NOTES<<RELEASE_NOTES_END"
-            echo "- 新增手机快传：手机扫码或输入地址，把视频、图片、APK 直传电视，支持进度显示、预览播放与文件管理"
-            echo "- 快传、自定义背景、备份恢复、源配置页面识别微信内置浏览器，提示改用系统浏览器后再选文件"
-            echo "- 高级搜索支持按服务端下发的条件筛选"
-            echo "- 设置内可单独隐藏导航模块（默认全显示），主界面只保留常用入口"
-            echo "- 备份与恢复包含导航模块显隐，重装或换机可完整还原"
+            echo "- 绿果TV 1.0.0：应用名称、图标、电视横幅与包名统一更新"
+            echo "- 采用黑色背景与薄荷绿强调色，统一现有页面的按钮、卡片和遥控器焦点"
+            echo "- 首页重新安排推荐卡、继续观看、海报列表与原有筛选入口，适配 16:9 电视"
+            echo "- 详情、播放控制、搜索、收藏、历史、设置、片源和手机传输页面保持原有业务功能"
+            echo "- 新包名 com.thugkd.lvguotv，与原版独立安装，原版数据不会自动迁移"
             echo "RELEASE_NOTES_END"
           } >> "$GITHUB_ENV"
       - name: Tests, release lint, and signed APK
         env:
-          HONGGUOTV_STORE_PASSWORD: ${{ secrets.HONGGUOTV_STORE_PASSWORD }}
-          HONGGUOTV_KEY_ALIAS: ${{ secrets.HONGGUOTV_KEY_ALIAS }}
-          HONGGUOTV_KEY_PASSWORD: ${{ secrets.HONGGUOTV_KEY_PASSWORD }}
+          LVGUOTV_STORE_PASSWORD: ${{ secrets.LVGUOTV_STORE_PASSWORD || secrets.HONGGUOTV_STORE_PASSWORD }}
+          LVGUOTV_KEY_ALIAS: ${{ secrets.LVGUOTV_KEY_ALIAS || secrets.HONGGUOTV_KEY_ALIAS }}
+          LVGUOTV_KEY_PASSWORD: ${{ secrets.LVGUOTV_KEY_PASSWORD || secrets.HONGGUOTV_KEY_PASSWORD }}
         run: ./kotlin-tv/gradlew -p kotlin-tv :core:test :app:lintRelease :app:assembleRelease --console=plain
       - name: Publish APK, source, and update manifest
         env:

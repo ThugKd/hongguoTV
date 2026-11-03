@@ -16,7 +16,7 @@ def nodes(name):
 
 def focused(name):
     node = next(n for n in nodes(name) if n.get('focused') == 'true')
-    assert node.get('package') == 'com.hongguotv.nativeapp', name
+    assert node.get('package') == 'com.thugkd.lvguotv', name
     return node
 
 

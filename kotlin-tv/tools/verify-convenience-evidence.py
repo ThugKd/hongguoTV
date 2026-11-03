@@ -10,7 +10,7 @@ def nodes(name):return list(ET.parse(root/(name+'.xml')).iter('node'))
 def texts(name):return [n.get('text','') for n in nodes(name)]
 def focus(name):
     n=next(n for n in nodes(name) if n.get('focused')=='true')
-    assert n.get('package')=='com.hongguotv.nativeapp'
+    assert n.get('package')=='com.thugkd.lvguotv'
     return n
 def check(label,passed):
     assert passed,label
