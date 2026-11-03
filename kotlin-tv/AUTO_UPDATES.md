@@ -22,7 +22,7 @@
 
 1. 配置本机 `kotlin-tv/keystore.properties` 或签名环境变量，使用长期保留且与已安装包一致的签名。不要提交私钥或密码。
 2. 例如构建本次版本：`LVGUOTV_VERSION_NAME=1.0.0 LVGUOTV_VERSION_CODE=14 ./scripts/build-kotlin.sh`。以后每个新构建都递增 versionCode。
-3. 把代码提交到 GitHub，并创建、推送对应标签，例如 `1.0.0`。
+3. 把代码提交到 GitHub，并创建、推送对应标签，例如 `v1.0.0`。
 4. 打开 **Releases → Draft a new release**，选择已推送的标签，填写标题和说明，上传 APK、`update.json`、`SHA256SUMS`，确认附件全部上传成功后发布并设为 latest。
 5. `update.json` 的 `tag` 必须与 Release 标签一致，包名、版本号、文件名、大小和 SHA-256 必须对应实际 APK。附件 APK 使用 `lvguotv-kotlin-1.0.0-android6.apk` 这类命名，以便应用内更新器识别。
 
@@ -41,7 +41,7 @@ CI 优先读取上述 `LVGUOTV_*` Secrets；也兼容已有的 `HONGGUOTV_KEYSTO
 
 ## 版本规则与本地构建
 
-- 当前手动发布：显示版本 `1.0.0`、versionCode `14`、标签 `1.0.0`。云端工作流仍使用 `versionCode = 10200 + release workflow run_number` 和 `kotlin-v1.0.0-build.run_number` 标签，保持后续构建编号递增。
+- 当前手动发布：显示版本 `1.0.0`、versionCode `14`、标签 `v1.0.0`。云端工作流仍使用 `versionCode = 10200 + release workflow run_number` 和 `kotlin-v1.0.0-build.run_number` 标签，保持后续构建编号递增。
 - 发布新版本前，将 `.github/workflows/release.yml` 中的版本号（当前 1.0.0）递增，并同步 `kotlin-tv/app/build.gradle.kts` 的默认 `versionName` 与 `kotlin-tv/README.md` 构建输出示例；调整版本显示名称时仍维持 versionCode 单调递增规则。
 - 已发布构建重跑会因标签已存在而失败，不会覆盖原 APK；旧构建重跑也不能取代更新的 latest。
 - 本地未传环境变量时生成 1.0.0 / versionCode 1，供首次验证。复现云端源码时，应从该 Release 的 `update.json` 读取版本，传入 `LVGUOTV_VERSION_CODE` 和 `LVGUOTV_VERSION_NAME`；本地低版本号的 APK 无法覆盖较高云端版本。正式分发以云端签名包为准。
