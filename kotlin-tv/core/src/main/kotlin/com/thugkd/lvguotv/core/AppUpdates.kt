@@ -47,7 +47,7 @@ data class AppUpdate(val versionCode: Long, val versionName: String, val minSdk:
                 o.getString("tag"), apk.getString("name"), apk.getLong("size"), apk.getString("sha256").lowercase(), o.optString("notes").take(1500), repository)
             require(update.versionCode in 1..Int.MAX_VALUE.toLong() && update.minSdk in 23..100)
             require(update.versionName.matches(Regex("[0-9][0-9A-Za-z.+-]{0,63}")))
-            require(update.tag.matches(Regex("kotlin-v[0-9][0-9A-Za-z.+-]{0,80}")))
+            require(update.tag.matches(Regex("(?:kotlin-v|v)?[0-9][0-9A-Za-z.+-]{0,80}")))
             require(update.fileName.matches(Regex("lvguotv-kotlin-[0-9][0-9A-Za-z.+-]{0,80}-android(?:6|8)\\.apk")))
             require(update.size in 1..MAX_APK_BYTES && update.sha256.matches(Regex("[0-9a-f]{64}")))
             return update

@@ -10,18 +10,29 @@
 - 选择「稍后」推迟该版本提醒一天；不会中断正在播放的视频。同版本、旧版本和要求更高 Android 版本的安装包不会自动安装。
 - APK 写入应用私有缓存，仅临时授权系统安装程序读取。下载使用 HTTPS、文件长度和 SHA-256 校验，并验证 APK 实际包名、版本号、最低 SDK 和当前安装应用的签名（Android 6 从 APK 清单读取最低 SDK，API 24 起读取 ApplicationInfo）；不在 APK 中保存 GitHub 令牌。
 
-## 从推送到发布
+## 从推送到发布（GitHub Actions）
 
-1. 向 `main` 推送原生客户端改动。
-2. `release.yml` 从 Secrets 恢复签名密钥，设定本次版本（见下文版本规则），执行 JVM 测试、Release lint 和正式签名构建。
-3. 构建成功后 `scripts/publish-tv-update.py` 创建 Release：标题为「绿果TV 版本号」，从上一个 `kotlin-v*` 标签到当前提交的提交记录自动生成更新日志，写入 Release 说明和 `update.json`；上传 APK、`update.json` 与 `SHA256SUMS`，并设为 latest。构建失败不替换旧版。
-4. 电视通过本仓库 Release 的 `latest/download/update.json` 获取新版本，无需 GitHub 登录。
+1. 向 `main` 推送客户端改动。当前工作流仅支持手动触发，推送代码或标签不会自动发布 APK。
+2. 在自己的仓库配置下述签名 Secrets；Fork 不会继承上游仓库的 Secrets，后续构建须沿用相同签名。
+3. 打开 **Actions → Build and publish TV update → Run workflow**，选择 `main`。工作流恢复签名并执行 JVM 测试、Release lint 和 release 构建。
+4. 构建成功后 `scripts/publish-tv-update.py` 创建 Release，上传 APK、`update.json` 和 `SHA256SUMS`，并设为 latest；GitHub 同时提供对应标签的源码下载。
+5. 应用通过本仓库 Release 的 `latest/download/update.json` 获取新版本，无需 GitHub 登录。
+
+## 本地打包后手动上传
+
+1. 配置本机 `kotlin-tv/keystore.properties` 或签名环境变量，使用长期保留且与已安装包一致的签名。不要提交私钥或密码。
+2. 例如构建本次版本：`LVGUOTV_VERSION_NAME=1.0.0 LVGUOTV_VERSION_CODE=14 ./scripts/build-kotlin.sh`。以后每个新构建都递增 versionCode。
+3. 把代码提交到 GitHub，并创建、推送对应标签，例如 `1.0.0`。
+4. 打开 **Releases → Draft a new release**，选择已推送的标签，填写标题和说明，上传 APK、`update.json`、`SHA256SUMS`，确认附件全部上传成功后发布并设为 latest。
+5. `update.json` 的 `tag` 必须与 Release 标签一致，包名、版本号、文件名、大小和 SHA-256 必须对应实际 APK。附件 APK 使用 `lvguotv-kotlin-1.0.0-android6.apk` 这类命名，以便应用内更新器识别。
+
+本次首次公开的 1.0.0（versionCode 14）沿用此前本机测试签名。早期 13 及以下测试包的更新器仅识别 `kotlin-v…` 标签，首次请手动覆盖安装这个新包；同包名、同签名可保留数据。新包支持 `1.0.0`、`v1.0.0` 和旧 `kotlin-v…` 标签，后续可正常使用应用内更新。
 
 ## 签名配置
 
 配置动作需仓库所有者授权。本仓库的 Actions Secrets：
 
-- `LVGUOTV_KEYSTORE_B64`：发布 keystore 的 Base64 编码（0.9.2 起因原密钥遗失换用新密钥，此后各版本沿用）。
+- `LVGUOTV_KEYSTORE_B64`：自己长期维护的签名 keystore 的 Base64 编码；不能使用上游私钥，也不要在后续版本随意更换。
 - `LVGUOTV_STORE_PASSWORD`、`LVGUOTV_KEY_ALIAS`、`LVGUOTV_KEY_PASSWORD`：签名配置。
 
 CI 优先读取上述 `LVGUOTV_*` Secrets；也兼容已有的 `HONGGUOTV_KEYSTORE_B64`、`HONGGUOTV_STORE_PASSWORD`、`HONGGUOTV_KEY_ALIAS`、`HONGGUOTV_KEY_PASSWORD` Secrets，并映射到新的构建变量。该映射不会更换签名密钥，也不要求重新上传已有密钥。
@@ -30,7 +41,7 @@ CI 优先读取上述 `LVGUOTV_*` Secrets；也兼容已有的 `HONGGUOTV_KEYSTO
 
 ## 版本规则与本地构建
 
-- 云端 `versionCode = 10200 + release workflow run_number`，单调递增；显示版本为 `1.0.0`；Release 标签为 `kotlin-v1.0.0-build.run_number`，标题为「绿果TV 1.0.0」。
+- 当前手动发布：显示版本 `1.0.0`、versionCode `14`、标签 `1.0.0`。云端工作流仍使用 `versionCode = 10200 + release workflow run_number` 和 `kotlin-v1.0.0-build.run_number` 标签，保持后续构建编号递增。
 - 发布新版本前，将 `.github/workflows/release.yml` 中的版本号（当前 1.0.0）递增，并同步 `kotlin-tv/app/build.gradle.kts` 的默认 `versionName` 与 `kotlin-tv/README.md` 构建输出示例；调整版本显示名称时仍维持 versionCode 单调递增规则。
 - 已发布构建重跑会因标签已存在而失败，不会覆盖原 APK；旧构建重跑也不能取代更新的 latest。
 - 本地未传环境变量时生成 1.0.0 / versionCode 1，供首次验证。复现云端源码时，应从该 Release 的 `update.json` 读取版本，传入 `LVGUOTV_VERSION_CODE` 和 `LVGUOTV_VERSION_NAME`；本地低版本号的 APK 无法覆盖较高云端版本。正式分发以云端签名包为准。
