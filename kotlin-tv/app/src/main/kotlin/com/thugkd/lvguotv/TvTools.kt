@@ -398,10 +398,29 @@ class TvTools(private val activity: Activity) {
         content.addView(status)
         val next=AlertDialog.Builder(activity).setView(TvDialog.card(activity,content)).create()
         TvDialog.styleWindow(activity,next,0.9f,620)
-        val player=ExoPlayer.Builder(activity).build()
-        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
-        player.prepare(); player.playWhenReady=true
-        view.player=player
+        val enhancement=VideoEnhancement(activity)
+        lateinit var player: ExoPlayer
+        fun startPlayer(position: Long,autoplay: Boolean) {
+            val instance=ExoPlayer.Builder(activity).build()
+            player=instance; view.player=instance
+            enhancement.applyTo(instance)
+            instance.addListener(object: androidx.media3.common.Player.Listener {
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    if(player!==instance || !enhancement.fallbackAfter(error)) return
+                    val resumePosition=instance.currentPosition.coerceAtLeast(0L)
+                    main.post {
+                        if(dialog===next && player===instance) {
+                            val resumeAutoplay=instance.playWhenReady
+                            view.player=null; instance.release()
+                            startPlayer(resumePosition,resumeAutoplay)
+                        }
+                    }
+                }
+            })
+            instance.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)),position)
+            instance.prepare(); instance.playWhenReady=autoplay
+        }
+        startPlayer(0L,true)
         next.setOnKeyListener { _,key,event ->
             if(event.action==KeyEvent.ACTION_DOWN && (key==KeyEvent.KEYCODE_DPAD_CENTER || key==KeyEvent.KEYCODE_ENTER || key==KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) {
                 player.playWhenReady=!player.playWhenReady

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.thugkd.lvguotv.core
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -38,7 +39,12 @@ data class ComicRanking(val positions: Map<String,RankPosition>, val totalPages:
 data class CatalogPage(val items: List<Series>, val hasMore: Boolean, val ranking: ComicRanking? = null)
 /** One website genre selector entry; the slug selects the category path, ids echo back for validation. */
 data class Genre(val slug: String, val name: String, val ids: List<String>)
-data class StreamInfo(val url: String, val key: ByteArray?, val quality: String)
+data class StreamInfo @JvmOverloads constructor(
+    val url: String,
+    val key: ByteArray?,
+    val quality: String,
+    val backupUrls: List<String> = emptyList(),
+)
 class SearchSessionExpiredException: IOException("搜索结果已过期，请从第 1 页重新搜索")
 /** 平台对该集只产出了 ByteVC2 等电视无法解码的编码，重试与换清晰度都不会成功。 */
 class UnplayableVideoException(message: String): IOException(message)
@@ -477,22 +483,23 @@ open class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().con
             val meta=row.optJSONObject("video_meta") ?: row
             val codec=meta.str("codec_type").ifEmpty { row.str("codec_type") }.lowercase()
             if(codec in setOf("bytevc2","bvc2") || row.str("gear_des_key").contains("bytevc2",true)) return@mapNotNull null
-            val address=playbackAddress(row,seed) ?: return@mapNotNull null
+            val addresses=playbackAddresses(row,seed)
+            if(addresses.isEmpty()) return@mapNotNull null
             val definition=meta.str("definition").ifEmpty { row.str("quality_desc").ifEmpty { row.str("quality") } }
             val dimensions=listOf(meta.str("vheight"),meta.str("vwidth"),meta.str("height"))
                 .mapNotNull { it.toIntOrNull()?.takeIf { value -> value>0 } }
             val quality=qualityNumber(definition).takeIf { it>0 } ?: dimensions.minOrNull() ?: 0
-            PlaybackVariant(quality,codec,row,address)
+            PlaybackVariant(quality,codec,row,addresses)
         }.sortedWith(compareByDescending<PlaybackVariant> { it.quality }.thenByDescending { it.codec in setOf("h264","avc1") })
         val selected=rows.firstOrNull { it.quality<=maxQuality } ?: rows.lastOrNull()
             ?: throw UnplayableVideoException("本集片源暂不兼容，请播放下一集")
         val encryption=selected.row.optJSONObject("encrypt_info") ?: selected.row
         val key=encryption.str("spade_a").takeIf { it.isNotEmpty() }?.let(MediaCrypto::deriveKey)
         val quality=if(selected.quality>0) "${selected.quality}P"+(if(selected.quality>maxQuality) "（兼容资源）" else "") else "自动"
-        return StreamInfo(selected.url,key,quality)
+        return StreamInfo(selected.urls.first(),key,quality,selected.urls.drop(1))
     }
 
-    private data class PlaybackVariant(val quality: Int,val codec: String,val row: JSONObject,val url: String)
+    private data class PlaybackVariant(val quality: Int,val codec: String,val row: JSONObject,val urls: List<String>)
 
     /** Accept direct models, JSON/base64 models, and the legacy VOD fallback response. */
     private fun playbackVideoInfo(response: JSONObject,id: String): JSONObject {
@@ -517,7 +524,7 @@ open class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().con
         return JSONObject(text(fallback)).optJSONObject("video_info")?.optJSONObject("data") ?: throw IOException("没有播放资源")
     }
 
-    private fun playbackAddress(row: JSONObject,seed: String): String? {
+    private fun playbackAddresses(row: JSONObject,seed: String): List<String> {
         val addresses=listOf("main_url","backup_url","backup_url_1","backup_url_2","backup_urls","url_list")
             .flatMap { field ->
                 when(val value=row.opt(field)) {
@@ -526,7 +533,7 @@ open class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().con
                     else -> emptyList()
                 }
             }
-        return addresses.firstNotNullOfOrNull { value ->
+        return addresses.mapNotNull { value ->
             runCatching {
                 val raw=cleanUrl(value.trim())
                 val address=when {
@@ -534,9 +541,9 @@ open class ContentRepository(val http: OkHttpClient = OkHttpClient.Builder().con
                     seed.isNotEmpty() -> MediaCrypto.decryptUrl(raw,decode64(seed))
                     else -> String(decode64(raw),Charsets.UTF_8)
                 }
-                cleanUrl(address).takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                cleanUrl(address).toHttpUrlOrNull()?.toString()
             }.getOrNull()
-        }
+        }.distinct()
     }
 
     private fun playerRequest(payload: ByteArray,identity: PlaybackDeviceSession.Profile): Request {

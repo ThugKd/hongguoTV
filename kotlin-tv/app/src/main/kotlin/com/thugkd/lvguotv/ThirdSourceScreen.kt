@@ -70,6 +70,7 @@ class ThirdSourceScreen(private val activity: Activity, private val rebuild: () 
     private val muted get() = TvStyle.muted
     private val store = ThirdStore(activity)
     private val playbackExtras=PlaybackExtras(activity)
+    private val videoEnhancement=VideoEnhancement(activity)
     private var fastForward=false
     private var speedBeforeFastForward=1f
     private var overlayInteractive=false
@@ -241,6 +242,17 @@ class ThirdSourceScreen(private val activity: Activity, private val rebuild: () 
         override fun onPlayerError(error: PlaybackException) {
             android.util.Log.w("LvguoTV", "third playback error: ${error.errorCodeName} ${error.message}")
             stallSeconds = 0
+            if(mode == Mode.PLAY && videoEnhancement.fallbackAfter(error)) {
+                val failedPlayer=player
+                val position=failedPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
+                // GPU 不兼容与片源无关；重建时保留排队期间最新的暂停状态。
+                main.post {
+                    if(mode == Mode.PLAY && player===failedPlayer) {
+                        attachPlayer(position,failedPlayer?.playWhenReady == true)
+                    }
+                }
+                return
+            }
             // 线路失效时先自动换下一条线路，全部试过才提示手动换集
             val data = detail
             val next = data?.groups?.indices?.firstOrNull { index ->
@@ -2425,6 +2437,7 @@ class ThirdSourceScreen(private val activity: Activity, private val rebuild: () 
         instance.setAudioAttributes(AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         view.player = instance
+        videoEnhancement.applyTo(instance)
         instance.addListener(playerListener)
         // 带宽估计回调：刷新缓冲提示里的实时网速
         instance.addAnalyticsListener(object : AnalyticsListener {

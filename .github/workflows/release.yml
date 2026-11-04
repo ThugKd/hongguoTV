@@ -22,7 +22,7 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Set monotonic build version and restore signing key
+      - name: Set release version and restore signing key
         env:
           # Accept existing signing secrets without changing the signing key.
           KEYSTORE_B64: ${{ secrets.LVGUOTV_KEYSTORE_B64 || secrets.HONGGUOTV_KEYSTORE_B64 }}
@@ -32,16 +32,17 @@ jobs:
           umask 077
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           echo "LVGUOTV_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "LVGUOTV_VERSION_CODE=$((10200 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "LVGUOTV_VERSION_NAME=1.0.0" >> "$GITHUB_ENV"
-          echo "UPDATE_TAG=kotlin-v1.0.0-build.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_CODE=19" >> "$GITHUB_ENV"
+          echo "LVGUOTV_VERSION_NAME=1.0.1" >> "$GITHUB_ENV"
+          echo "UPDATE_TAG=v1.0.1" >> "$GITHUB_ENV"
           {
             echo "RELEASE_NOTES<<RELEASE_NOTES_END"
-            echo "- 绿果TV 1.0.0：应用名称、图标、电视横幅与包名统一更新"
-            echo "- 采用黑色背景与薄荷绿强调色，统一现有页面的按钮、卡片和遥控器焦点"
-            echo "- 首页重新安排推荐卡、继续观看、海报列表与原有筛选入口，适配 16:9 电视"
-            echo "- 详情、播放控制、搜索、收藏、历史、设置、片源和手机传输页面保持原有业务功能"
-            echo "- 新包名 com.thugkd.lvguotv，与原版独立安装，原版数据不会自动迁移"
+            echo "- 画面增强默认开启，可手动关闭；使用保色的自适应亮度锐化，保持画面原有亮度与色彩"
+            echo "- 内置、片源与快传视频统一增强处理；HDR 保持原画，GPU 特效失败自动回退"
+            echo "- 网络取流失败时优先尝试同清晰度备用地址，减少不必要的画质下降"
+            echo "- 临时降档后重新选择 1080P 立即重新取流，保留进度和播放/暂停状态"
+            echo "- 网络降档后稳定播放 30 秒，下一集可尝试恢复清晰度；每次观看会话最多一次，解码降档不自动升档"
+            echo "- 清晰度弹窗打开后正确聚焦当前选择，遥控器可直接确认"
             echo "RELEASE_NOTES_END"
           } >> "$GITHUB_ENV"
       - name: Tests, release lint, and signed APK

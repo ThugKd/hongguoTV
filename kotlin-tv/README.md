@@ -5,12 +5,23 @@
 这是独立的 **Kotlin + Android 原生 View + Media3** 工程，最低 Android 6.0 / API 23。安装一个 APK，联网后可直接浏览和播放，无需部署 Node、Docker 或填写服务器地址。
 
 - 应用名称：绿果TV
-- 应用版本：`1.0.0`。
+- 应用版本：`1.0.1`（versionCode `19`）。
 - 包名：`com.thugkd.lvguotv`（与原版独立安装，原版数据不会自动迁移）。
 - 收藏和历史保存在本机，可通过「本地备份与恢复」在重装后自动恢复。
 - APK 不含 JNI 库，可由 Android 在 ARM32、ARM64、x86、x86_64 上运行；视频解码能力依赖设备。
 - 源码分支：`main`；通过 GitHub Actions 手动触发发布构建。
 - [本项目发布页](https://github.com/ThugKd/hongguoTV/releases)
+
+## 1.0.1 画面与播放优化
+
+- 设置 → 播放偏好新增「画面增强」，默认开启并在本机记忆，支持手动关闭。内置、片源与快传视频播放器统一使用保色的自适应亮度锐化，修正开启增强后画面变暗的问题，并限制噪点、白边和颜色通道裁切。
+- 画面增强不改变片源分辨率、不重新编码；HDR 不应用 SDR 锐化，GPU 特效不可用时自动切回原画并保留播放进度与播放/暂停状态。
+- 网络取流失败时优先尝试同清晰度的备用地址，减少不必要的画质下降；备用地址仍失败时保留原有降档恢复机制。
+- 修复已临时降到 720P 时，重新选择全局默认的 1080P 没有立即生效的问题；手动选档重新取流，并保留当前进度和播放/暂停状态。
+- 网络降档后连续稳定播放 30 秒，下一集可尝试恢复用户设置的清晰度；每次观看会话最多自动尝试一次，解码能力导致的降档不会自动升档。
+- 清晰度弹窗打开后直接聚焦当前选择，遥控器确认即可选择。
+
+- 修复画面增强失败回退时，排队中的播放器重建可能覆盖最新暂停或退后台状态的问题。
 
 ## 1.0.0 界面改版
 
@@ -315,7 +326,7 @@
 adb install -r kotlin-tv/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-正式 APK 使用独立发布密钥，**私钥和口令不在 GitHub 中**。重建发布包时，配置以下环境变量，或创建被 Git 忽略的 `kotlin-tv/keystore.properties`：
+本 Fork 发布 APK 沿用既有签名以支持覆盖升级，**私钥和口令不在 GitHub 中**。重建发布包时，配置以下环境变量，或创建被 Git 忽略的 `kotlin-tv/keystore.properties`：
 
 ```properties
 storeFile=/absolute/path/to/your-release.jks
@@ -328,7 +339,7 @@ keyPassword=your-password
 
 ```sh
 ./scripts/build-kotlin.sh
-# 输出：outputs/lvguotv-kotlin-1.0.0-android6.apk
+# 输出：outputs/lvguotv-kotlin-1.0.1-android6.apk
 ```
 
 ## Android 6.0 兼容

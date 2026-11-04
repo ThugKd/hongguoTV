@@ -2,6 +2,7 @@
 package com.thugkd.lvguotv.core
 
 import okhttp3.Call
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.Closeable
@@ -21,7 +22,11 @@ class RemoteVideo(
     @Volatile private var closed=false
     private val calls=mutableSetOf<Call>()
     data class Range(val bytes: ByteArray,val total: Long)
-    var total: Long=0; private set
+    @Volatile var total: Long=0; private set
+    private val urls=(listOf(info.url)+info.backupUrls).distinct()
+    private val routeLock=Any()
+    private var routeIndex=0
+    private class CancelledRead(cause: IOException? = null): IOException("播放请求已取消",cause)
     private lateinit var prepared: MediaCrypto.Prepared
     private val lock=Object()
     private val cache=HashMap<Long,ByteArray>()
@@ -42,24 +47,90 @@ class RemoteVideo(
     fun stats(): Stats = synchronized(lock) { Stats(readerChunks,aheadChunks,hitChunks,missChunks,fetchedBytes) }
 
     private fun range(start: Long,end: Long): Range {
-        if(closed) throw IOException("播放请求已取消")
+        if(closed || Thread.currentThread().isInterrupted) throw CancelledRead()
         require(start>=0 && end>=start && end-start<8*1024*1024)
-        val request=Request.Builder().url(info.url).header("User-Agent",VendorConstants.VIDEO_UA).header("Referer","https://novel.snssdk.com/").header("Range","bytes=$start-$end").header("Accept-Encoding","identity").build()
+        val initialRoute=synchronized(routeLock) { routeIndex }
+        val firstFailure=try {
+            return requestRange(urls[initialRoute],start,end)
+        } catch(cancelled: CancelledRead) {
+            throw cancelled
+        } catch(problem: IOException) {
+            problem
+        }
+        // Normal reader/read-ahead requests remain concurrent. Only route changes are serialized.
+        return synchronized(routeLock) {
+            var failure=firstFailure
+            if(routeIndex!=initialRoute) {
+                try {
+                    return@synchronized requestRange(urls[routeIndex],start,end)
+                } catch(cancelled: CancelledRead) {
+                    throw cancelled
+                } catch(problem: IOException) {
+                    failure=problem
+                }
+            }
+            for(nextRoute in routeIndex+1 until urls.size) {
+                try {
+                    val firstChunk=synchronized(lock) { cache[0L] }
+                    // A backup must contain the same bytes before sharing decrypted MP4 offsets/cache.
+                    // Before the first successful read there is no accepted resource to compare against.
+                    if(firstChunk!=null) {
+                        val identity=requestRange(urls[nextRoute],0L,firstChunk.lastIndex.toLong())
+                        if(!identity.bytes.contentEquals(firstChunk)) {
+                            throw IOException("视频备用线路内容不一致")
+                        }
+                    }
+                    val result=requestRange(urls[nextRoute],start,end)
+                    routeIndex=nextRoute
+                    return@synchronized result
+                } catch(cancelled: CancelledRead) {
+                    throw cancelled
+                } catch(problem: IOException) {
+                    failure=problem
+                }
+            }
+            throw failure
+        }
+    }
+
+    private fun requestRange(url: String,start: Long,end: Long): Range {
+        if(closed || Thread.currentThread().isInterrupted) throw CancelledRead()
+        val address=url.toHttpUrlOrNull() ?: throw IOException("视频地址无效")
+        val request=Request.Builder().url(address).header("User-Agent",VendorConstants.VIDEO_UA)
+            .header("Referer","https://novel.snssdk.com/").header("Range","bytes=$start-$end")
+            .header("Accept-Encoding","identity").build()
         val call=http.newCall(request)
-        synchronized(calls) { if(closed) throw IOException("播放请求已取消"); calls+=call }
+        synchronized(calls) {
+            if(closed) throw CancelledRead()
+            calls+=call
+        }
         try {
             return RequestScope.execute(call) { response ->
                 if(response.code!=206) throw IOException("视频服务器不支持分段读取（HTTP ${response.code}）")
-                val match=Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(response.header("Content-Range").orEmpty()) ?: throw IOException("视频分段响应异常")
+                val match=Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(response.header("Content-Range").orEmpty())
+                    ?: throw IOException("视频分段响应异常")
                 val (begin,finish,size)=match.destructured
-                val full=size.toLong(); val last=minOf(end,full-1)
-                if(begin.toLong()!=start || finish.toLong()!=last || full<=0) throw IOException("视频分段范围不匹配")
+                val full=size.toLongOrNull() ?: throw IOException("视频分段响应异常")
+                val last=minOf(end,full-1)
+                if(begin.toLongOrNull()!=start || finish.toLongOrNull()!=last || full<=start) {
+                    throw IOException("视频分段范围不匹配")
+                }
                 if(total!=0L && full!=total) throw IOException("视频资源已变化，请重试")
-                val n=(last-start+1).toInt(); val body=response.body ?: throw IOException("视频分段为空")
-                val bytes=body.source().readByteArray(n.toLong())
+                val length=last-start+1
+                val body=response.body ?: throw IOException("视频分段为空")
+                if(body.contentLength()>=0 && body.contentLength()!=length) {
+                    throw IOException("视频分段长度不匹配")
+                }
+                val bytes=body.source().readByteArray(length)
+                if(closed || call.isCanceled() || Thread.currentThread().isInterrupted) throw CancelledRead()
                 Range(bytes,full)
             }
-        } finally { synchronized(calls) { calls-=call } }
+        } catch(problem: IOException) {
+            if(closed || call.isCanceled() || Thread.currentThread().isInterrupted) throw CancelledRead(problem)
+            throw problem
+        } finally {
+            synchronized(calls) { calls-=call }
+        }
     }
     private fun fetchChunk(start: Long): Range {
         val end=if(total>0) minOf(total,start+chunkBytes)-1 else start+chunkBytes-1L

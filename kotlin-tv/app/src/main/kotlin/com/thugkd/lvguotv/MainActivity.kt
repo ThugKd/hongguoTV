@@ -158,7 +158,13 @@ class MainActivity: Activity() {
     private lateinit var connectivity: ConnectivityManager
     private var networkRegistered=false
     private val networkCallback=object: ConnectivityManager.NetworkCallback() {
-        private fun changed() { main.post { if(connectivity.isActiveNetworkMetered || !networkAvailable()) cancelPrefetch(); if(foreground && screen=="player" && playError && autoRecovery) scheduleRecovery() } }
+        private fun changed() {
+            main.post {
+                if(!networkAvailable()) qualitySession.onPlayback(false,android.os.SystemClock.elapsedRealtime())
+                if(connectivity.isActiveNetworkMetered || !networkAvailable()) cancelPrefetch()
+                if(foreground && screen=="player" && playError && autoRecovery) scheduleRecovery()
+            }
+        }
         override fun onAvailable(network: Network) { changed() }
         override fun onLost(network: Network) { changed() }
         override fun onCapabilitiesChanged(network: Network,capabilities: NetworkCapabilities) { changed() }
@@ -261,6 +267,7 @@ class MainActivity: Activity() {
     private var episodeIndex=0
     private var group=0
     private var synopsisExpanded=false
+    private val videoEnhancement by lazy { VideoEnhancement(this) }
     private var player: ExoPlayer?=null
     private var video: RemoteVideo?=null
     private var playbackReady=false
@@ -277,8 +284,8 @@ class MainActivity: Activity() {
     private var playError=false
     private var lastSaved=0L
     private var quality=""
-    /** 本次播放会话内的临时降档，不改用户全局设置；重进播放页或手动改清晰度时清除。 */
-    private var sessionQuality: Int?=null
+    /** 网络临时降档可在稳定播放后的下一集恢复，解码限制保留到重新选档。 */
+    private val qualitySession=PlaybackQualitySession()
     private var downgradeEpisode=""
     private var downgradeCount=0
     private val tick=object: Runnable {
@@ -288,6 +295,9 @@ class MainActivity: Activity() {
                 if(sleepTimer.poll()) stopForSleep()
                 if(hud.visibility==View.VISIBLE) updatePlaybackText()
                 danmakuLoader?.let { loader -> if(player?.isPlaying==true) { val position=currentPosition(); io.execute { runCatching { loader.loadUpTo(position) } } } }
+                if(player?.playbackState != Player.STATE_ENDED) {
+                    qualitySession.onPlayback(player?.isPlaying == true && networkAvailable(),android.os.SystemClock.elapsedRealtime())
+                }
                 maybePrefetch()
                 val p=player; val data=detail
                 if(p!=null && data!=null && playbackReady && !playError && outroSkipSeconds>0 && !outroTriggered && p.isPlaying) {
@@ -1704,6 +1714,12 @@ class MainActivity: Activity() {
         val sourceSettings=if(library.sourceHidden) null else setting(device,"片源管理  ›") { switchTab(6) }
         lateinit var qualityButton: TextView
         qualityButton=setting(playback,"默认清晰度  ·  ${library.maxQuality}P") { showQualityPicker(qualityButton,false) }
+        lateinit var pictureEnhancement: TextView
+        pictureEnhancement=setting(playback,"画面增强  ·  ${if(videoEnhancement.enabled) "开启" else "关闭"}") {
+            videoEnhancement.enabled=!videoEnhancement.enabled
+            pictureEnhancement.text="画面增强  ·  ${if(videoEnhancement.enabled) "开启" else "关闭"}"
+            Toast.makeText(this,if(videoEnhancement.enabled) "画面增强已开启：自适应锐化" else "画面增强已关闭：使用原画",Toast.LENGTH_SHORT).show()
+        }
         lateinit var defaultSpeed: TextView
         defaultSpeed=setting(playback,"默认倍速  ·  ${PlaybackSpeed.label(library.playbackSpeed)}") { showSpeedPicker(defaultSpeed,false) }
         lateinit var frame: TextView
@@ -1869,7 +1885,7 @@ class MainActivity: Activity() {
             gravity=Gravity.CENTER; setPadding(dp(10),0,dp(10),dp(6))
         }
         rechainSettings={
-            val left=listOf(qualityButton,defaultSpeed,frame,autoNextButton,autoSeasonButton,danmakuButton)+
+            val left=listOf(qualityButton,pictureEnhancement,defaultSpeed,frame,autoNextButton,autoSeasonButton,danmakuButton)+
                 (if(library.danmaku) listOf(danmakuToggle)+(if(danmakuExpanded) danmakuPrefRows else emptyList()) else emptyList())+
                 listOf(blockedWords,keySettings,autoSkipButton)
             val right=listOfNotNull(sourceSettings,clockButton,backdropButton,localBackupButton,backup,quickSend,quickFiles,hidden,statsButton,navModulesButton,clearCache,updates,checkButton,license)
@@ -2585,12 +2601,18 @@ class MainActivity: Activity() {
         updater.interrupt()
         val data=detail ?: return
         val playbackStarted=android.os.SystemClock.elapsedRealtime()
-        // 从详情页重新进播放器时丢弃上一轮的临时降档；自动连播保持在同一条降档链上。
-        if(screen!="player") { sessionQuality=null; downgradeEpisode=""; downgradeCount=0 }
+        if(screen!="player") { qualitySession.reset(); downgradeEpisode=""; downgradeCount=0 }
         val reuse=screen=="player" && player!=null && playerView!=null && !recovering && !playError
         library.setWatched(data.series.id,false)
         val selectedIndex=index.coerceIn(0,data.episodes.lastIndex)
-        val prefetched=if(position==0L && !recovering) preparedNext.take("${data.episodes[selectedIndex]}:${effectiveQuality()}") else null
+        val requestedId=data.episodes[selectedIndex]
+        val previousQuality=effectiveQuality()
+        if(!networkAvailable()) qualitySession.onPlayback(false,android.os.SystemClock.elapsedRealtime())
+        qualitySession.beginEpisode(requestedId!=downgradeEpisode)
+        if(effectiveQuality()>previousQuality) {
+            android.util.Log.i("LvguoTV","Retry preferred quality at episode boundary: ${effectiveQuality()}P")
+        }
+        val prefetched=if(position==0L && !recovering) preparedNext.take("$requestedId:${effectiveQuality()}") else null
         val claimedHttp=if(prefetched!=null) prefetchHttp.also { prefetchHttp=null } else null
         saveProgress(); library.flush(); invalidatePage(); favoriteMonitor.stop(); releaseCatalogViews(); stopDanmaku()
         if(reuse) {
@@ -2642,7 +2664,7 @@ class MainActivity: Activity() {
         playbackText.text="正在获取播放地址…"; progressBar.progress=0; progressBar.visibility=View.VISIBLE; hidePlaybackOverlay()
         controls.removeAllViews(); controls.visibility=View.GONE; transportPlay=null; sleepButton=null
         syncMediaSession()
-        val requestedId=data.episodes[episodeIndex]; val maxQuality=effectiveQuality(); val ticket=generation
+        val maxQuality=effectiveQuality(); val ticket=generation
         // 每集最多自动降两档，换集后重新计数，避免一集失败就把整部剧拖到最低画质。
         if(requestedId!=downgradeEpisode) { downgradeEpisode=requestedId; downgradeCount=0 }
         work({ prefetched ?: RemoteVideo(repository.http,repository.stream(requestedId,maxQuality)).prepare() }, { remote ->
@@ -2652,6 +2674,7 @@ class MainActivity: Activity() {
                 val renderers=androidx.media3.exoplayer.DefaultRenderersFactory(this).setEnableDecoderFallback(true)
                 ExoPlayer.Builder(this,renderers).setLoadControl(load).build().also {
                     player=it; playerView?.player=it
+                    videoEnhancement.applyTo(it)
                     it.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true)
                     it.setHandleAudioBecomingNoisy(true)
                 }
@@ -2671,6 +2694,7 @@ class MainActivity: Activity() {
                         else if(rebufferStart>0) { android.util.Log.w("LvguoTV","Rebuffer end episode=${episodeIndex+1} stalledMs=${android.os.SystemClock.elapsedRealtime()-rebufferStart}"); rebufferStart=0 }
                         if(hud.visibility==View.VISIBLE) updatePlaybackText()
                     }
+                    if(state==Player.STATE_BUFFERING) qualitySession.onPlayback(false,android.os.SystemClock.elapsedRealtime())
                     if(state==Player.STATE_BUFFERING && !firstReady && rebufferStart==0L) { rebufferStart=android.os.SystemClock.elapsedRealtime(); android.util.Log.w("LvguoTV","Rebuffer start episode=${episodeIndex+1} positionMs=${p.currentPosition}") }
                     syncMediaSession()
                     if(state==Player.STATE_ENDED) {
@@ -2688,10 +2712,30 @@ class MainActivity: Activity() {
                         android.util.Log.w("LvguoTV","Playback first frame episode=${episodeIndex+1} preloaded=${prefetched!=null} reused=$reuse elapsedMs=${android.os.SystemClock.elapsedRealtime()-playbackStarted}")
                     }
                 }
-                override fun onIsPlayingChanged(playing: Boolean) { if(active()) { if(hud.visibility==View.VISIBLE) showHud(); syncMediaSession() } }
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    if(!active()) return
+                    if(p.playbackState!=Player.STATE_ENDED) {
+                        qualitySession.onPlayback(playing && networkAvailable(),android.os.SystemClock.elapsedRealtime())
+                    }
+                    if(hud.visibility==View.VISIBLE) showHud()
+                    syncMediaSession()
+                }
                 override fun onPlaybackParametersChanged(parameters: PlaybackParameters) { if(active()) syncMediaSession() }
                 override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo,newPosition: Player.PositionInfo,reason: Int) { if(active()) { syncMediaSession(); danmakuView?.seekTo(newPosition.positionMs) } }
-                override fun onPlayerError(error: PlaybackException) { if(active()) playerFailure(error) }
+                override fun onPlayerError(error: PlaybackException) {
+                    if(!active()) return
+                    if(videoEnhancement.fallbackAfter(error)) {
+                        val resumePosition=p.currentPosition.coerceAtLeast(0L)
+                        // 特效失败时重建为直接输出；排队期间的暂停和退后台决定是否续播。
+                        playError=true
+                        main.post {
+                            if(player===p && generation==ticket && screen=="player") {
+                                val resumeAutoplay=foreground && requestedAutoplay && !pausedForLifecycle && !sleepStopped
+                                playEpisode(episodeIndex,resumePosition,resumeAutoplay)
+                            }
+                        }
+                    } else playerFailure(error)
+                }
             }
             playerListener=listener; p.addListener(listener)
             val source=ProgressiveMediaSource.Factory { VideoDataSource(remote) }.createMediaSource(MediaItem.Builder().setMediaId(requestedId).setUri("lvguotv://episode/$requestedId").setMimeType(MimeTypes.VIDEO_MP4).build())
@@ -2714,7 +2758,9 @@ class MainActivity: Activity() {
         val p=player ?: return; val data=detail ?: return
         if(!foreground || !p.isPlaying || !library.autoNext || playError || sleepStopped || episodeIndex>=data.episodes.lastIndex) return
         if(!PrefetchPolicy.nearEnd(p.currentPosition,p.duration,p.playbackParameters.speed)) return
-        val id=data.episodes[episodeIndex+1]; val quality=effectiveQuality(); val key="$id:$quality"
+        val id=data.episodes[episodeIndex+1]
+        val quality=qualitySession.nextEpisodeQuality(library.maxQuality)
+        val key="$id:$quality"
         if(preparedNext.isFresh(key) || prefetchJob?.isDone==false) return
         val now=android.os.SystemClock.elapsedRealtime()
         if(readySince==0L || now-readySince<3000 || p.bufferedPosition-p.currentPosition<5000) return
@@ -2747,10 +2793,11 @@ class MainActivity: Activity() {
         retryPending=true; main.postDelayed(retryRunnable,delay)
     }
     /** 播放取流用的档位：本会话降过档就用降档值，否则用用户设置值。 */
-    private fun effectiveQuality(): Int = sessionQuality ?: library.maxQuality
+    private fun effectiveQuality(): Int = qualitySession.quality(library.maxQuality)
     /** 临时降档只影响本次播放，不写回用户设置，避免一集片源坏了就把全局画质永久拉低。 */
-    private fun applySessionDowngrade(target: Int) {
-        sessionQuality=target; downgradeCount++
+    private fun applySessionDowngrade(target: Int,decoderFailure: Boolean) {
+        qualitySession.downgrade(target,decoderFailure)
+        downgradeCount++
         android.util.Log.w("LvguoTV","Auto downgrade to ${target}P episode=${episodeIndex+1} attempt=$downgradeCount actual=$quality")
         playEpisode(episodeIndex,retryPosition,retryAutoplay)
     }
@@ -2761,6 +2808,7 @@ class MainActivity: Activity() {
         return QualityDowngrade.next(QualityDowngrade.parse(quality),effectiveQuality())
     }
     private fun playerFailure(problem: Throwable) {
+        qualitySession.onPlayback(false,android.os.SystemClock.elapsedRealtime())
         retryPosition=currentPosition().coerceAtLeast(0); retryAutoplay=requestedAutoplay && !sleepStopped
         saveProgress(); cancelRecovery(); cancelPrefetch()
         playError=true; player?.pause(); progressBar.visibility=View.GONE; hud.visibility=View.VISIBLE; controls.removeAllViews(); controls.visibility=View.VISIBLE; panel=true
@@ -2790,7 +2838,7 @@ class MainActivity: Activity() {
             addButton(actions,"立即重试") { playEpisode(episodeIndex,retryPosition,retryAutoplay) }.requestFocus()
             // 手动入口的档位按当前实际播放档位推算，不再写死 720P。
             QualityDowngrade.next(QualityDowngrade.parse(quality),effectiveQuality())?.let { lower ->
-                addButton(actions,"切换到 ${lower}P") { sessionQuality=null; downgradeCount=0; library.maxQuality=lower; playEpisode(episodeIndex,retryPosition,retryAutoplay) }
+                addButton(actions,"切换到 ${lower}P") { qualitySession.reset(); downgradeCount=0; library.maxQuality=lower; playEpisode(episodeIndex,retryPosition,retryAutoplay) }
             }
             addButton(actions,"返回选集") { returnToDetail(true) }
         }
@@ -2799,7 +2847,7 @@ class MainActivity: Activity() {
         if(lower!=null) {
             playbackText.text="当前清晰度无法播放，正在自动切换到 ${lower}P"
             autoRecovery=false
-            main.postDelayed({ if(foreground && screen=="player" && playError) applySessionDowngrade(lower) },600)
+            main.postDelayed({ if(foreground && screen=="player" && playError) applySessionDowngrade(lower,decoding) },600)
         } else if(retryable && !sleepStopped) {
             addButton(controls,"停止自动重试") { cancelRecovery(); playbackText.text="自动重试已停止，观看位置已保留。" }
             autoRecovery=true; scheduleRecovery()
@@ -3260,20 +3308,27 @@ class MainActivity: Activity() {
     private fun showQualityPicker(anchor: TextView,inPlayer: Boolean) {
         val options=PlaybackQuality.options
         val selected=options.indexOf(library.maxQuality)
+        lateinit var dialog: AlertDialog
         val content=column()
         content.addView(TvDialog.title(this,"全局默认清晰度"))
         val adapter=TvDialog.RadioAdapter(this,options.map { "${it}P" }).apply { this.selected=selected }
         val list=ListView(this).apply {
             this.adapter=adapter
             choiceMode=ListView.CHOICE_MODE_NONE
+            isFocusableInTouchMode=true
             setOnItemClickListener { _,_,index,_ ->
                 adapter.selected=index
-                val target=options[index]; val changed=library.maxQuality!=target
+                val target=options[index]
+                val actualQuality=QualityDowngrade.parse(quality)
+                val reload=inPlayer && (library.maxQuality!=target || qualitySession.hasTemporaryLimit ||
+                    playError || (actualQuality>0 && actualQuality!=target))
+                val position=currentPosition()
+                val autoplay=player?.playWhenReady ?: requestedAutoplay
                 library.maxQuality=target
-                // 用户手动选定档位即视为放弃本轮自动降档，后续失败重新从选定档位起算。
-                sessionQuality=null; downgradeEpisode=""; downgradeCount=0
+                qualitySession.reset(); downgradeEpisode=""; downgradeCount=0
                 if(anchor.tag!="playback-settings") anchor.text=(if(inPlayer) "清晰度 " else "默认清晰度  ·  ")+"${target}P"
-                if(inPlayer && changed) playEpisode(episodeIndex,currentPosition(),player?.playWhenReady ?: requestedAutoplay)
+                if(inPlayer) dialog.dismiss()
+                if(reload) playEpisode(episodeIndex,position,autoplay)
             }
         }
         content.addView(list,lp(-1,0).apply { weight=1f })
@@ -3281,11 +3336,16 @@ class MainActivity: Activity() {
         val cancel=TvDialog.capsuleButton(this,"取消") { }
         buttons.addView(cancel,lp(-2,-2))
         content.addView(buttons)
-        val dialog=AlertDialog.Builder(this).setView(TvDialog.card(this,content)).create()
-        TvDialog.styleWindow(this,dialog)
+        dialog=AlertDialog.Builder(this).setView(TvDialog.card(this,content)).create()
+        TvDialog.styleWindow(this,dialog) {
+            list.post {
+                list.requestFocus()
+                list.setSelection(selected)
+            }
+        }
         cancel.setOnClickListener { dialog.dismiss() }
         dialog.setOnDismissListener { if(anchor.isAttachedToWindow) anchor.requestFocus() }
-        dialog.show(); list.setSelection(selected); list.requestFocus()
+        dialog.show()
     }
     private fun navModuleNames()=listOf("search" to "搜索","rank" to "排行榜","favorite" to "收藏","history" to "最近观看","source" to "片源")
     private fun navModuleHidden(key: String)=if(key=="source") library.sourceHidden else library.navHidden(key)

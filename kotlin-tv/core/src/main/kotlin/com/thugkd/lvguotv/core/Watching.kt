@@ -24,6 +24,66 @@ object QualityDowngrade {
     }
 }
 
+/** Keeps decoder limits separate from temporary network limits for one viewing session. */
+class PlaybackQualitySession {
+    private var networkLimit: Int? = null
+    private var decoderLimit: Int? = null
+    private var stableSinceMs: Long? = null
+    private var recoveryReady = false
+    private var recoveryAttempted = false
+
+    val hasTemporaryLimit: Boolean
+        get() = networkLimit != null || decoderLimit != null
+
+    fun quality(configured: Int): Int =
+        minOf(configured, networkLimit ?: configured, decoderLimit ?: configured)
+
+    /** Preloading must request the same quality that the next episode will use. */
+    fun nextEpisodeQuality(configured: Int): Int =
+        if (recoveryReady && !recoveryAttempted) minOf(configured, decoderLimit ?: configured)
+        else quality(configured)
+
+    fun beginEpisode(changed: Boolean) {
+        if (changed && recoveryReady && !recoveryAttempted) {
+            networkLimit = null
+            recoveryAttempted = true
+        }
+        clearStability()
+    }
+
+    fun downgrade(target: Int, decoderFailure: Boolean) {
+        if (decoderFailure) decoderLimit = minOf(decoderLimit ?: target, target)
+        else networkLimit = minOf(networkLimit ?: target, target)
+        clearStability()
+    }
+
+    fun onPlayback(playing: Boolean, nowMs: Long) {
+        if (!playing || networkLimit == null || recoveryAttempted) {
+            clearStability()
+            return
+        }
+        val started = stableSinceMs
+        if (started == null) stableSinceMs = nowMs
+        else if (nowMs - started >= STABLE_PLAYBACK_MS) recoveryReady = true
+    }
+
+    fun reset() {
+        networkLimit = null
+        decoderLimit = null
+        recoveryAttempted = false
+        clearStability()
+    }
+
+    private fun clearStability() {
+        stableSinceMs = null
+        recoveryReady = false
+    }
+
+    private companion object {
+        const val STABLE_PLAYBACK_MS = 30_000L
+    }
+}
+
 /** One automatic recovery budget per episode; only an explicit user retry resets it. */
 class RecoveryBudget {
     var attempts=0; private set

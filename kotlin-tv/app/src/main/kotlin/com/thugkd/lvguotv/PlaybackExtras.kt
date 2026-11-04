@@ -24,6 +24,11 @@ class PlaybackExtras(context: Context) {
         prefs.edit().putBoolean(KEY_DANMAKU + seriesId, on).apply()
     }
 
+    /** 大屏轻度亮度锐化，默认开启；设备不兼容时仅本次运行回退，不改变用户选择。 */
+    var pictureEnhancement: Boolean
+        get() = prefs.getBoolean(KEY_PICTURE_ENHANCEMENT, true)
+        set(value) { prefs.edit().putBoolean(KEY_PICTURE_ENHANCEMENT, value).apply() }
+
     /** 平台只提供电视不可解码的清晰度时，自动跳到下一集（默认关闭，避免跳过用户想看的集数）。 */
     var autoSkipUnplayable: Boolean
         get() = prefs.getBoolean(KEY_AUTO_SKIP, false)
@@ -49,6 +54,7 @@ class PlaybackExtras(context: Context) {
         private const val KEY_BLOCKED = "blockedWords"
         private const val KEY_DANMAKU = "danmaku:"
         private const val KEY_AUTO_SKIP = "autoSkipUnplayable"
+        private const val KEY_PICTURE_ENHANCEMENT = "pictureEnhancement"
         private const val KEY_SEEK_STEP = "seekStepSeconds"
         private const val KEY_FAST_SPEED = "longPressSpeed"
         private const val KEY_MENU = "menuKeyAction"

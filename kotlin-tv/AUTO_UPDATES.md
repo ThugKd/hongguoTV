@@ -21,10 +21,10 @@
 ## 本地打包后手动上传
 
 1. 配置本机 `kotlin-tv/keystore.properties` 或签名环境变量，使用长期保留且与已安装包一致的签名。不要提交私钥或密码。
-2. 例如构建本次版本：`LVGUOTV_VERSION_NAME=1.0.0 LVGUOTV_VERSION_CODE=14 ./scripts/build-kotlin.sh`。以后每个新构建都递增 versionCode。
-3. 把代码提交到 GitHub，并创建、推送对应标签，例如 `v1.0.0`。
+2. 例如构建本次版本：`LVGUOTV_VERSION_NAME=1.0.1 LVGUOTV_VERSION_CODE=19 ./scripts/build-kotlin.sh`。同一 versionName 的测试、修复和重复打包保持 versionCode 不变；只有升级 versionName 时才同步递增 versionCode。
+3. 把代码提交到 GitHub，并创建、推送对应标签，例如 `v1.0.1`。
 4. 打开 **Releases → Draft a new release**，选择已推送的标签，填写标题和说明，上传 APK、`update.json`、`SHA256SUMS`，确认附件全部上传成功后发布并设为 latest。
-5. `update.json` 的 `tag` 必须与 Release 标签一致，包名、版本号、文件名、大小和 SHA-256 必须对应实际 APK。附件 APK 使用 `lvguotv-kotlin-1.0.0-android6.apk` 这类命名，以便应用内更新器识别。
+5. `update.json` 的 `tag` 必须与 Release 标签一致，包名、版本号、文件名、大小和 SHA-256 必须对应实际 APK。附件 APK 使用 `lvguotv-kotlin-1.0.1-android6.apk` 这类命名，以便应用内更新器识别。
 
 本次首次公开的 1.0.0（versionCode 14）沿用此前本机测试签名。早期 13 及以下测试包的更新器仅识别 `kotlin-v…` 标签，首次请手动覆盖安装这个新包；同包名、同签名可保留数据。新包支持 `1.0.0`、`v1.0.0` 和旧 `kotlin-v…` 标签，后续可正常使用应用内更新。
 
@@ -41,10 +41,10 @@ CI 优先读取上述 `LVGUOTV_*` Secrets；也兼容已有的 `HONGGUOTV_KEYSTO
 
 ## 版本规则与本地构建
 
-- 当前手动发布：显示版本 `1.0.0`、versionCode `14`、标签 `v1.0.0`。云端工作流仍使用 `versionCode = 10200 + release workflow run_number` 和 `kotlin-v1.0.0-build.run_number` 标签，保持后续构建编号递增。
-- 发布新版本前，将 `.github/workflows/release.yml` 中的版本号（当前 1.0.0）递增，并同步 `kotlin-tv/app/build.gradle.kts` 的默认 `versionName` 与 `kotlin-tv/README.md` 构建输出示例；调整版本显示名称时仍维持 versionCode 单调递增规则。
-- 已发布构建重跑会因标签已存在而失败，不会覆盖原 APK；旧构建重跑也不能取代更新的 latest。
-- 本地未传环境变量时生成 1.0.0 / versionCode 1，供首次验证。复现云端源码时，应从该 Release 的 `update.json` 读取版本，传入 `LVGUOTV_VERSION_CODE` 和 `LVGUOTV_VERSION_NAME`；本地低版本号的 APK 无法覆盖较高云端版本。正式分发以云端签名包为准。
+- 当前发布配置：显示版本 `1.0.1`、versionCode `19`、标签 `v1.0.1`。本地构建和手动触发的云端工作流使用相同版本，不再按工作流运行次数生成另一套版本号。19 高于本轮已安装的 1.0.0 测试包 18。
+- 发布新版本前，同步 `.github/workflows/release.yml`、`kotlin-tv/distribution/release.yml` 模板、`kotlin-tv/app/build.gradle.kts` 的 `versionName` / `versionCode` 和发布标签，以及 README 构建输出示例。仅升级 versionName 时同步递增 versionCode，使其高于此前版本；同一版本的测试与修复包保持相同 versionCode。标准标签使用 `v` 加版本号。
+- 同名 Release 已存在时，发布脚本会在创建 Release 时失败，不会覆盖已有附件。发布前确认标签指向本次已验证代码，并核对 APK 的包名、版本和签名；仅推送代码或标签不会触发发布。
+- 本地未传版本环境变量时生成 1.0.1 / versionCode 19。复现已发布源码时，应从该 Release 的 `update.json` 读取版本，传入 `LVGUOTV_VERSION_CODE` 和 `LVGUOTV_VERSION_NAME`。本地和 CI 发布均须沿用已安装版本的签名；低版本号的 APK 无法直接覆盖高版本号。
 
 电视系统没有安装器、禁止未知来源或无法访问 GitHub 时，自动更新不能完成；旧版仍可继续使用。最低 API 23 不等于 Android 6.0 实体电视已验收。
 
